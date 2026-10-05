@@ -5,8 +5,7 @@
 # Sigstore attestation and the upload are the shared
 # branchkit/registry/release-action, identical for every plugin.
 #
-# Windows is not built yet: the shared release action installs branchkit-cli
-# with a Unix shell step.
+# No Windows on arm64: sherpa-onnx publishes no static libraries for it.
 
 name: Release
 
@@ -30,6 +29,7 @@ jobs:
           - { goos: darwin, goarch: amd64, runner: macos-14, target: x86_64-apple-darwin }
           - { goos: linux, goarch: amd64, runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { goos: windows, goarch: amd64, runner: windows-latest, target: x86_64-pc-windows-msvc, exe: .exe }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -40,12 +40,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
+        shell: bash
         run: scripts/build.sh ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.target }}
 
       - name: Package, sign, release
         uses: branchkit/registry/release-action@main
         with:
-          binary: announcements-plugin
+          binary: announcements-plugin${{ matrix.exe }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           tag: ${{ github.ref_name }}

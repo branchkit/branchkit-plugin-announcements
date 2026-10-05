@@ -10,7 +10,10 @@ set -euo pipefail
 goos=$1 goarch=$2 target=$3
 cd "$(dirname "$0")/.."
 
-GOOS=$goos GOARCH=$goarch go build -C src -trimpath -ldflags='-s -w' -o ../announcements-plugin .
+exe=""
+[ "$goos" = windows ] && exe=.exe
+
+GOOS=$goos GOARCH=$goarch go build -C src -trimpath -ldflags='-s -w' -o "../announcements-plugin$exe" .
 
 # The engine is distributed under the GPL-3.0 (it statically links espeak-ng),
 # so it is built only against the unmodified sherpa-onnx release libraries,
@@ -18,7 +21,5 @@ GOOS=$goos GOARCH=$goarch go build -C src -trimpath -ldflags='-s -w' -o ../annou
 unset SHERPA_ONNX_LIB_DIR
 cargo build --locked --release --target "$target" --manifest-path stages/sherpa-tts/Cargo.toml
 
-exe=""
-[ "$goos" = windows ] && exe=.exe
 cp "stages/sherpa-tts/target/$target/release/sherpa_tts$exe" .
-echo "built announcements-plugin and sherpa_tts$exe for $goos/$goarch"
+echo "built announcements-plugin$exe and sherpa_tts$exe for $goos/$goarch"

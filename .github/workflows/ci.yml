@@ -47,7 +47,8 @@ jobs:
         run: cargo clippy --release -- -D warnings
 
   # What a release would ship, built and packaged on every push the way the
-  # release workflow does it, then checked: both programs executable, the
+  # release workflow does it, for the same targets (keep the two matrices
+  # equal), then checked: both programs executable, the
   # engine's licence notices beside it, no source. Nothing is published.
   package:
     strategy:
@@ -55,7 +56,10 @@ jobs:
       matrix:
         include:
           - { goos: darwin, goarch: arm64, runner: macos-14, target: aarch64-apple-darwin }
+          - { goos: darwin, goarch: amd64, runner: macos-14, target: x86_64-apple-darwin }
           - { goos: linux, goarch: amd64, runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { goos: windows, goarch: amd64, runner: windows-latest, target: x86_64-pc-windows-msvc, exe: .exe }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -66,12 +70,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build
+        shell: bash
         run: scripts/build.sh ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.target }}
       - name: Package
+        shell: bash
         run: |
-          go install github.com/branchkit/branchkit-cli@63b03d55ffca52e1d74204427294e7c19f88bdba
-          "$(go env GOPATH)/bin/branchkit-cli" plugin package . \
+          go run github.com/branchkit/branchkit-cli@63b03d55ffca52e1d74204427294e7c19f88bdba plugin package . \
             --os ${{ matrix.goos }} --arch ${{ matrix.goarch }} \
             --exclude stages --exclude scripts --out dist
       - name: Check the archive
+        shell: bash
         run: scripts/check-archive.sh dist/branchkit-plugin-announcements-*.tar.gz
