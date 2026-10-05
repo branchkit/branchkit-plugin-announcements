@@ -51,3 +51,6 @@ jobs:
           goarch: ${{ matrix.goarch }}
           tag: ${{ github.ref_name }}
           exclude: stages scripts
+          # Pinned, so a release packages with a known CLI rather than
+          # whatever `latest` is that day. Move it forward deliberately.
+          cli-version: v0.1.0-rc.1
