@@ -143,6 +143,10 @@ cargo build --release --manifest-path stages/sherpa-tts/Cargo.toml
 cp stages/sherpa-tts/target/release/sherpa_tts .
 ```
 
+`scripts/build.sh <goos> <goarch> <rust-target>` builds both for one target,
+the way CI and the release do; CI then packages the result and checks the
+archive (`scripts/check-archive.sh`) on every push.
+
 ## License
 
 The source is MIT; see [LICENSE](LICENSE). The built speech engine binary is

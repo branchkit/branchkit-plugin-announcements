@@ -1,8 +1,12 @@
-# Release — builds, signs, and publishes on every version tag.
+# Release: builds, packages, signs and publishes on every version tag.
 #
-# Only the build step is language-specific. Packaging, checksums, Sigstore
-# attestation, and the release upload are the shared
+# scripts/build.sh builds the plugin and its speech engine (sherpa_tts) for
+# each target, the same script CI runs on every push. Packaging, checksums,
+# Sigstore attestation and the upload are the shared
 # branchkit/registry/release-action, identical for every plugin.
+#
+# Windows is not built yet: the shared release action installs branchkit-cli
+# with a Unix shell step.
 
 name: Release
 
@@ -13,32 +17,36 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: write      # upload release assets
       id-token: write      # OIDC for keyless signing
       attestations: write  # record the attestation
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { goos: darwin, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64, runner: macos-14, target: aarch64-apple-darwin }
+          - { goos: darwin, goarch: amd64, runner: macos-14, target: x86_64-apple-darwin }
+          - { goos: linux, goarch: amd64, runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Build
-        run: |
-          mkdir -p out
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -C src -o ../out/announcements-plugin .
+        run: scripts/build.sh ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.target }}
 
       - name: Package, sign, release
         uses: branchkit/registry/release-action@main
         with:
-          binary: out/announcements-plugin
+          binary: announcements-plugin
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           tag: ${{ github.ref_name }}
+          exclude: stages scripts

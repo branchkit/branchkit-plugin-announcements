@@ -2,4 +2,6 @@ announcements-plugin
 src/branchkit-plugin-announcements
 sherpa_tts
 sherpa_tts.exe
-stages/sherpa-tts/target/
+# no trailing slash: the build cache may make target a link, not a directory
+stages/sherpa-tts/target
+dist/
