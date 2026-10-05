@@ -3,8 +3,8 @@ Announcements — third-party notices
 The source in this repository is MIT licensed (LICENSE).
 
 The speech engine binary, `sherpa_tts` (built from stages/sherpa-tts), is
-distributed under the GNU General Public License, version 3, because it
-statically links espeak-ng. Its complete corresponding source is this
+distributed under the GNU General Public License, version 3 (full text in
+LICENSE-GPL-3.0), because it statically links espeak-ng. Its complete corresponding source is this
 repository at the release's tag, plus the components below, all public.
 
 - espeak-ng — https://github.com/espeak-ng/espeak-ng — GPL-3.0-or-later.
