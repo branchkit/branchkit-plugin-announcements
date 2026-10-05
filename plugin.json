@@ -1,0 +1,254 @@
+{
+  "$schema": "https://branchkit.dev/schemas/manifest.json",
+  "id": "announcements",
+  "name": "Announcements",
+  "icon": "accessibility",
+  "version": "0.2.0",
+  "min_api_version": "0.2.0",
+  "description": "Announcements: tells you what went wrong, the mode you are in and the choices it offers, and \u2014 for a person who cannot see the screen \u2014 what just happened. Spoken through the system voice or a local neural voice it ships (sherpa-onnx: Kitten by default, Piper and Kokoro to download, or a voice you add); a renderer of the semantic output channel, on the bus event every plugin's feedback already produces.",
+  "author": "BranchKit",
+  "publisher": "github:branchkit",
+  "requires": {
+    "privileges": [
+      "speech",
+      "events.output"
+    ],
+    "capabilities": {
+      "uses": [
+        "speech.announce",
+        "speech.engines",
+        "speech.restart_engine",
+        "speech.say",
+        "speech.stop"
+      ],
+      "required": [
+        "speech.say"
+      ]
+    }
+  },
+  "dev": {
+    "build": [
+      [
+        "go",
+        "build",
+        "-ldflags=-s -w",
+        "-o",
+        "../announcements-plugin",
+        "."
+      ],
+      [
+        "cargo",
+        "build",
+        "--release",
+        "--manifest-path",
+        "../stages/sherpa-tts/Cargo.toml"
+      ],
+      [
+        "cp",
+        "../stages/sherpa-tts/target/release/sherpa_tts",
+        "../sherpa_tts"
+      ]
+    ],
+    "build_dir": "src"
+  },
+  "run": "./announcements-plugin",
+  "provides": {
+    "collections": {
+      "plugin.announcements.config": {
+        "preset": "settings",
+        "label": "Announcements",
+        "description": "Announcement settings. Defaults live here; only your changes are stored.",
+        "fields": [
+          {
+            "key": "sight",
+            "label": "Can you see the screen?",
+            "field_type": "string",
+            "default": "system"
+          },
+          {
+            "key": "hearing",
+            "label": "Can you hear?",
+            "field_type": "string",
+            "default": "yes"
+          },
+          {
+            "key": "speak",
+            "label": "Speak announcements",
+            "field_type": "string",
+            "default": "no"
+          },
+          {
+            "key": "speak_outcomes",
+            "label": "Say what happened",
+            "field_type": "boolean",
+            "default": false
+          },
+          {
+            "key": "choices_limit",
+            "label": "Choices read aloud",
+            "field_type": "int",
+            "default": 6
+          },
+          {
+            "key": "engine",
+            "label": "Voice",
+            "field_type": "string",
+            "default": "kitten"
+          },
+          {
+            "key": "voice",
+            "label": "Speaker",
+            "field_type": "string",
+            "default": ""
+          },
+          {
+            "key": "rate",
+            "label": "Speed",
+            "field_type": "number",
+            "default": 1.0
+          },
+          {
+            "key": "custom_model",
+            "label": "Your voice's folder",
+            "field_type": "string",
+            "default": ""
+          },
+          {
+            "key": "custom_family",
+            "label": "Your voice's kind",
+            "field_type": "string",
+            "default": "vits"
+          }
+        ]
+      }
+    },
+    "stages": {
+      "kitten": {
+        "stage_type": "tts",
+        "binary": "sherpa_tts",
+        "args": [
+          "--model",
+          "kitten-nano-en-v0_1-fp16",
+          "--family",
+          "kitten"
+        ]
+      },
+      "piper_amy": {
+        "stage_type": "tts",
+        "binary": "sherpa_tts",
+        "args": [
+          "--model",
+          "vits-piper-en_US-amy-low",
+          "--family",
+          "vits"
+        ]
+      },
+      "kokoro": {
+        "stage_type": "tts",
+        "binary": "sherpa_tts",
+        "args": [
+          "--model",
+          "kokoro-en-v0_19",
+          "--family",
+          "kokoro"
+        ]
+      },
+      "custom": {
+        "stage_type": "tts",
+        "binary": "sherpa_tts",
+        "args": [
+          "--custom",
+          "custom-voice.json"
+        ]
+      }
+    },
+    "artifacts": {
+      "kitten-nano-en-v0_1-fp16": {
+        "description": "Kitten nano: 8 English voices, fast, small (Apache-2.0)",
+        "size_bytes": 26855312,
+        "parts": [
+          {
+            "kind": "http_archive",
+            "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+            "sha256": "f35dac93754fe2ac97c66e1f468311d0d2130f7f0f5a89bfa1197e09a0cbdec5",
+            "members": [
+              "model.fp16.onnx",
+              "voices.bin",
+              "tokens.txt",
+              "LICENSE",
+              "espeak-ng-data/"
+            ]
+          }
+        ]
+      },
+      "vits-piper-en_US-amy-low": {
+        "description": "Piper Amy: one American English voice, the fastest",
+        "size_bytes": 67095344,
+        "parts": [
+          {
+            "kind": "http_archive",
+            "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
+            "sha256": "c70f5284a09a7fd4ed203b39b2ff51cac1432b422b852eb647b481dade3cf639",
+            "members": [
+              "en_US-amy-low.onnx",
+              "en_US-amy-low.onnx.json",
+              "tokens.txt",
+              "MODEL_CARD",
+              "espeak-ng-data/"
+            ]
+          }
+        ]
+      },
+      "kokoro-en-v0_19": {
+        "description": "Kokoro: 11 American and British voices, the most natural, large and slower",
+        "size_bytes": 319625534,
+        "parts": [
+          {
+            "kind": "http_archive",
+            "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
+            "sha256": "912804855a04745fa77a30be545b3f9a5d15c4d66db00b88cbcd4921df605ac7",
+            "members": [
+              "model.onnx",
+              "voices.bin",
+              "tokens.txt",
+              "LICENSE",
+              "espeak-ng-data/"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "consumes": {
+    "events": [
+      {
+        "pattern": "_platform.output.state"
+      },
+      {
+        "pattern": "_platform.output.cleared"
+      },
+      {
+        "pattern": "_platform.pipeline.started"
+      },
+      {
+        "pattern": "_platform.pipeline.stopped"
+      },
+      {
+        "pattern": "_platform.collection.updated"
+      }
+    ],
+    "collections": [
+      "_platform.accessibility",
+      "_platform.model_download"
+    ]
+  },
+  "implements": {
+    "settings_tabs": [
+      {
+        "label": "Announcements",
+        "key": "announcements"
+      }
+    ],
+    "render_settings": true
+  }
+}

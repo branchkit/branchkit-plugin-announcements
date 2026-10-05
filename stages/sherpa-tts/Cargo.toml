@@ -1,0 +1,27 @@
+[package]
+name = "sherpa-tts"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "A local neural speech engine stage for BranchKit, on sherpa-onnx."
+
+[[bin]]
+name = "sherpa_tts"
+path = "src/main.rs"
+
+# Its own workspace: the engine builds on its own from this repository, and
+# stays out of any workspace a checkout of this repository sits inside.
+[workspace]
+
+[dependencies]
+# The stage SDK's speech engine runtime arrived after the 0.1.0 crates.io
+# release, so it comes from the repository, pinned.
+branchkit-stage-sdk = { git = "https://github.com/branchkit/stage-sdk", rev = "42543c93c58668157b176fa6d77b89b9e0b3fb17" }
+# Stock sherpa-onnx: the build script downloads the upstream prebuilt static
+# libraries for the target. Never point SHERPA_ONNX_LIB_DIR at a modified
+# build: this binary is distributed under the GPL (see NOTICE), and anything
+# linked into it is distributed under it too.
+sherpa-onnx-sys = "1.13.2"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }

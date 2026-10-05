@@ -1,0 +1,44 @@
+# Release — builds, signs, and publishes on every version tag.
+#
+# Only the build step is language-specific. Packaging, checksums, Sigstore
+# attestation, and the release upload are the shared
+# branchkit/registry/release-action, identical for every plugin.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # upload release assets
+      id-token: write      # OIDC for keyless signing
+      attestations: write  # record the attestation
+    strategy:
+      matrix:
+        include:
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        run: |
+          mkdir -p out
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -C src -o ../out/announcements-plugin .
+
+      - name: Package, sign, release
+        uses: branchkit/registry/release-action@main
+        with:
+          binary: out/announcements-plugin
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          tag: ${{ github.ref_name }}

@@ -1,0 +1,23 @@
+Announcements — third-party notices
+
+The source in this repository is MIT licensed (LICENSE).
+
+The speech engine binary, `sherpa_tts` (built from stages/sherpa-tts), is
+distributed under the GNU General Public License, version 3, because it
+statically links espeak-ng. Its complete corresponding source is this
+repository at the release's tag, plus the components below, all public.
+
+- espeak-ng — https://github.com/espeak-ng/espeak-ng — GPL-3.0-or-later.
+  Turns text into phonemes for the Kitten, Kokoro and Piper voices. Its
+  language data (espeak-ng-data) is downloaded with each voice model.
+- sherpa-onnx — https://github.com/k2-fsa/sherpa-onnx — Apache-2.0.
+  Unmodified: the build links the project's own prebuilt release libraries
+  (sherpa-onnx-sys 1.13.2).
+- piper-phonemize — https://github.com/rhasspy/piper-phonemize — MIT.
+- ONNX Runtime — https://github.com/microsoft/onnxruntime — MIT.
+- branchkit-stage-sdk — https://github.com/branchkit/stage-sdk — MIT.
+
+Voice models are not part of this repository or of the binary. They are
+downloaded on request from the sherpa-onnx model releases, each under its
+own licence (Kitten: Apache-2.0; Kokoro: Apache-2.0; Piper voices: see each
+voice's MODEL_CARD).
