@@ -2,7 +2,7 @@
   "$schema": "https://branchkit.dev/schemas/manifest.json",
   "id": "announcements",
   "name": "Announcements",
-  "icon": "accessibility",
+  "icon": "radio",
   "version": "0.2.0",
   "min_api_version": "0.2.0",
   "description": "Announcements: tells you what went wrong, the mode you are in and the choices it offers, and \u2014 for a person who cannot see the screen \u2014 what just happened. Spoken through the system voice or a local neural voice it ships (sherpa-onnx: Kitten by default, Piper and Kokoro to download, or a voice you add); a renderer of the semantic output channel, on the bus event every plugin's feedback already produces.",
