@@ -202,19 +202,6 @@ func (h *Host) applyPolicy() {
 	h.r.Apply(pol)
 }
 
-// decodeEvent reads an event's params into v. The bus delivers the event's
-// params directly; an envelope with a `data` object is accepted too, so a
-// transport change cannot silently mute the renderer.
-func decodeEvent(raw json.RawMessage, v any) error {
-	var probe struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Data) > 0 && probe.Data[0] == '{' {
-		return json.Unmarshal(probe.Data, v)
-	}
-	return json.Unmarshal(raw, v)
-}
-
 func main() {
 	p := branchkit.NewPlugin()
 	h := &Host{plugin: p}
@@ -233,33 +220,13 @@ func main() {
 	downloads.OnChange(func() { h.recheckEngine(true) })
 	p.OnReady(func() { h.applyPolicy() })
 
-	p.On("_platform.output.state", func(raw json.RawMessage) {
-		var m branchkit.OutputStateEventParams
-		if err := decodeEvent(raw, &m); err != nil {
-			branchkit.Logf("announcements", "output.state: undecodable event: %v", err)
-			return
-		}
-		h.r.HandleState(m)
-	})
-	p.On("_platform.output.cleared", func(raw json.RawMessage) {
-		var m branchkit.OutputClearedEventParams
-		if err := decodeEvent(raw, &m); err != nil {
-			return
-		}
-		h.r.HandleClear(m)
-	})
-	p.On("_platform.pipeline.started", func(raw json.RawMessage) {
-		var m branchkit.PipelineStartedEventParams
-		if err := decodeEvent(raw, &m); err != nil {
-			return
-		}
+	// A payload that does not decode is skipped and logged by the SDK.
+	p.OnOutputState(h.r.HandleState)
+	p.OnOutputCleared(h.r.HandleClear)
+	p.OnPipelineStarted(func(m branchkit.PipelineStartedEventParams) {
 		h.r.PipelineStarted(m.Pipeline, m.Ephemeral != nil && *m.Ephemeral)
 	})
-	p.On("_platform.pipeline.stopped", func(raw json.RawMessage) {
-		var m branchkit.PipelineStoppedEventParams
-		if err := decodeEvent(raw, &m); err != nil {
-			return
-		}
+	p.OnPipelineStopped(func(m branchkit.PipelineStoppedEventParams) {
 		h.r.PipelineStopped(m.Pipeline)
 	})
 
