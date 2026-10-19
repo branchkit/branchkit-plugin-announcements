@@ -290,7 +290,7 @@ func main() {
 		if c.artifact == "" {
 			return fmt.Errorf("%q has nothing to download", req.Value)
 		}
-		return p.ControlSignal(branchkit.ControlSignalRequest{Signal: "download_model:" + p.ID() + "/" + c.artifact})
+		return p.ArtifactDownload(branchkit.ArtifactDownloadRequest{Ref: p.ID() + "/" + c.artifact})
 	})
 	branchkit.HandleCommand(p, "set_choices_limit", func(req *setLimitRequest) error {
 		n, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(req.Limit)))
