@@ -110,7 +110,7 @@ network: the manifest declares no hosts, so the sandbox gives it none.
 - **Linux**: the system voice through speech-dispatcher, which must be
   installed; without it, speaking is refused with a message saying so.
 - **Windows**: the system voice through SAPI, using the voice set in
-  Settings → Speech.
+  BranchKit → Speech.
 
 On Linux and Windows the platform does not yet report a running screen
 reader, so "Follow VoiceOver" has nothing to follow there; answer Yes or No
