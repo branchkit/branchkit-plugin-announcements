@@ -230,7 +230,7 @@ func main() {
 		h.r.PipelineStopped(m.Pipeline)
 	})
 
-	p.SettingsTab("announcements", h.renderSettings)
+	p.Page("announcements", h.renderSettings)
 	branchkit.HandleCommand(p, "set_speak", func(req *setChoiceRequest) error {
 		switch req.Value {
 		case "system", "yes", "no":
