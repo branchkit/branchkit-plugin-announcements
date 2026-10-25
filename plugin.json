@@ -146,6 +146,9 @@
       },
       "kokoro": {
         "stage_type": "tts",
+        "resources": {
+          "memory_mb": 2048
+        },
         "binary": "sherpa_tts",
         "args": [
           "--model",
@@ -156,6 +159,9 @@
       },
       "custom": {
         "stage_type": "tts",
+        "resources": {
+          "memory_mb": 2048
+        },
         "binary": "sherpa_tts",
         "args": [
           "--custom",
