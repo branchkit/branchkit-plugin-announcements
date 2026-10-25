@@ -52,7 +52,7 @@ dependencies = [
 [[package]]
 name = "branchkit-stage-sdk"
 version = "0.2.0"
-source = "git+https://github.com/branchkit/stage-sdk?rev=42543c93c58668157b176fa6d77b89b9e0b3fb17#42543c93c58668157b176fa6d77b89b9e0b3fb17"
+source = "git+https://github.com/branchkit/stage-sdk?rev=b1fc86443777b2b7ee39eb9e5b9fd755d182faaf#b1fc86443777b2b7ee39eb9e5b9fd755d182faaf"
 dependencies = [
  "getrandom 0.2.17",
  "libc",
@@ -249,7 +249,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -720,7 +720,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

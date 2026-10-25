@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 # The stage SDK's speech engine runtime arrived after the 0.1.0 crates.io
 # release, so it comes from the repository, pinned.
-branchkit-stage-sdk = { git = "https://github.com/branchkit/stage-sdk", rev = "42543c93c58668157b176fa6d77b89b9e0b3fb17" }
+branchkit-stage-sdk = { git = "https://github.com/branchkit/stage-sdk", rev = "b1fc86443777b2b7ee39eb9e5b9fd755d182faaf" }
 # Stock sherpa-onnx: the build script downloads the upstream prebuilt static
 # libraries for the target. Never point SHERPA_ONNX_LIB_DIR at a modified
 # build: this binary is distributed under the GPL (see NOTICE), and anything
