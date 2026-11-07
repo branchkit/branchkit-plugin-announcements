@@ -311,17 +311,34 @@ func TestAnInterruptReSaysAnUnheardHead(t *testing.T) {
 	}
 }
 
-// Words handed to a voice that is no longer speaking (VoiceOver turned on,
-// another engine loaded) are beyond a cut: they are not said a second time
-// through the new one.
-func TestAVoiceChangeForgetsTheOldVoicesQueue(t *testing.T) {
+// Words handed to a voice that is no longer the one speaking (VoiceOver
+// turned on, another engine loaded) are beyond a high-priority cut, which
+// reaches only the new voice's queue: they are not cut, nor said a second
+// time through the new voice. A clear still may not Stop (which silences
+// every voice) while another channel is heard on the old one.
+func TestAVoiceChangeLeavesTheOldVoicesQueue(t *testing.T) {
 	r, v := renderer(t, on)
-	r.HandleState(state("a", 1, true, doc("notice", "", "one", "notable")))
+	r.HandleState(state("x", 1, true, doc("notice", "", "one", "notable")))
 	r.HandleState(state("b", 1, true, doc("notice", "", "two", "notable")))
+	r.SpeechStarted(v.ids["one"])
 	v.route = "kitten"
 	r.HandleState(state("a", 2, true, doc("notice", "", "three", "notable")))
 	if !reflect.DeepEqual(v.log, []string{"say:one", "say:two", "say:three"}) {
 		t.Fatalf("nothing of the old voice is cut or repeated: %v", v.log)
+	}
+	r.HandleState(state("c", 1, true, doc("mode", "", "quiet mode", "notable")))
+	before := len(v.log)
+	r.HandleClear(branchkit.OutputClearedEventParams{Channel: "a", PluginID: "voice", Generation: 9})
+	if len(v.log) != before {
+		t.Fatalf("a clear cut the old voice's heard sentence: %v", v.log)
+	}
+	// The old voice is done: now a's clear may stop the new one, and what
+	// waited there is said again.
+	v.finish(r, "one")
+	v.finish(r, "two")
+	r.HandleClear(branchkit.OutputClearedEventParams{Channel: "a", PluginID: "voice", Generation: 10})
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:quiet mode"}) {
+		t.Fatalf("a clear of the playing channel: %v", got)
 	}
 }
 

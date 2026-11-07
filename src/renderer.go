@@ -19,7 +19,8 @@ import (
 type Voice interface {
 	Say(text string, high bool) string
 	// Route names what Say speaks through now (VoiceOver, the system
-	// voice, an engine stage): a cut reaches only that one's queue.
+	// voice, an engine stage): a high-priority Say cuts only that voice's
+	// queue, while Stop silences every voice.
 	Route() string
 	Stop()
 	// UseVoiceOver switches Say between the system voice and VoiceOver.
@@ -103,10 +104,10 @@ type Renderer struct {
 	listening map[string]bool // ephemeral pipelines running
 	newest    map[string]int  // newest generation seen per channel
 	held      map[string]heldDoc
-	// What the voice is saying and what waits behind it, in order: the
-	// head is playing. Followed by the platform's speech events, because
-	// "the channel spoken last" is not the one playing once anything
-	// queues.
+	// What the voices are saying and what waits behind it, in the order
+	// it was handed over: each voice's first entry is what it plays.
+	// Followed by the platform's speech events, because "the channel
+	// spoken last" is not the one playing once anything queues.
 	queue []queued
 }
 
@@ -181,33 +182,75 @@ func (r *Renderer) HandleClear(msg branchkit.OutputClearedEventParams) {
 	}
 	r.newest[msg.Channel] = msg.Generation
 	delete(r.held, msg.Channel)
-	r.pruneRouteLocked()
-	if len(r.queue) == 0 || r.queue[0].channel != msg.Channel {
-		// Nothing of this channel is playing. Words of it waiting behind
-		// another channel's are left to be said: the voice can only stop
-		// everything, and cutting someone else's sentence is worse than a
-		// notice heard after its card has gone (a person who cannot see
-		// the card still needs it).
+	// Stop silences every voice, so it is used only when this channel is
+	// playing and no other channel's sentence is being heard. Otherwise
+	// this channel's words are left to be said: cutting someone else's
+	// sentence is worse than a notice heard after its card has gone (a
+	// person who cannot see the card still needs it).
+	mine := false
+	for i, q := range r.queue {
+		if !r.isHeadLocked(i) {
+			continue
+		}
+		if q.channel == msg.Channel {
+			mine = true
+		} else if q.started {
+			return
+		}
+	}
+	if !mine {
 		return
 	}
-	waiting := r.waitingLocked(msg.Channel)
+	var waiting []queued
+	for _, q := range r.queue {
+		if q.channel != msg.Channel {
+			waiting = append(waiting, q) // none of it heard yet: no head of another channel has started
+		}
+	}
 	r.voice.Stop()
 	r.queue = nil
 	r.requeueLocked(waiting)
 }
 
+// isHeadLocked: queue[i] is the first utterance of its voice, the one that
+// voice is playing (or about to).
+func (r *Renderer) isHeadLocked(i int) bool {
+	for j := 0; j < i; j++ {
+		if r.queue[j].route == r.queue[i].route {
+			return false
+		}
+	}
+	return true
+}
+
 // SpeechStarted: utterance id is now heard, so whatever this renderer
-// queued ahead of it is over, even if its end was never reported.
+// queued ahead of it on the same voice is over, even if its end was never
+// reported.
 func (r *Renderer) SpeechStarted(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	at := -1
 	for i, q := range r.queue {
 		if q.id == id {
-			r.queue = r.queue[i:]
-			r.queue[0].started = true
-			return
+			at = i
+			break
 		}
 	}
+	if at < 0 {
+		return
+	}
+	route := r.queue[at].route
+	kept := make([]queued, 0, len(r.queue))
+	for i, q := range r.queue {
+		if i < at && q.route == route {
+			continue
+		}
+		if i == at {
+			q.started = true
+		}
+		kept = append(kept, q)
+	}
+	r.queue = kept
 }
 
 // SpeechFinished: utterance id is over (played out, cut off or dropped).
@@ -324,10 +367,13 @@ func (r *Renderer) speakLocked(channel, urgency, text string) {
 	// The channel playing: the new state supersedes it. Another channel
 	// playing: only an interrupt cuts in; notable and ambient wait their
 	// turn, so one plugin's ordinary news never talks over another's.
-	r.pruneRouteLocked()
+	route := r.voice.Route()
 	playing := ""
-	if len(r.queue) > 0 {
-		playing = r.queue[0].channel
+	for _, q := range r.queue {
+		if q.route == route {
+			playing = q.channel
+			break
+		}
 	}
 	high := playing != "" && (playing == channel || urgency == "interrupt")
 	branchkit.Logf("announcements", "speak %s (%s%s): %q", channel, urgency, map[bool]string{true: ", cuts in", false: ""}[high], text)
@@ -335,11 +381,23 @@ func (r *Renderer) speakLocked(channel, urgency, text string) {
 		r.sayLocked(channel, text, false)
 		return
 	}
-	// A cut drops everything queued behind the sentence it cuts; other
-	// channels' words that were waiting are said again after this one.
-	// This channel's are not: the new state replaces them.
-	waiting := r.waitingLocked(channel)
-	r.queue = nil
+	// A cut drops everything this voice queued behind the sentence it
+	// cuts, and the sentence itself; other channels' words of it that were
+	// not heard yet are said again after this one. This channel's are not:
+	// the new state replaces them. Other voices' queues are out of reach.
+	var waiting, kept []queued
+	head := true
+	for _, q := range r.queue {
+		if q.route != route {
+			kept = append(kept, q)
+			continue
+		}
+		if (!head || !q.started) && q.channel != channel {
+			waiting = append(waiting, q)
+		}
+		head = false
+	}
+	r.queue = kept
 	r.sayLocked(channel, text, true)
 	r.requeueLocked(waiting)
 }
@@ -349,32 +407,6 @@ func (r *Renderer) sayLocked(channel, text string, high bool) {
 	if id := r.voice.Say(text, high); id != "" {
 		r.queue = append(r.queue, queued{id: id, channel: channel, text: text, route: route})
 	}
-}
-
-// pruneRouteLocked forgets utterances handed to a voice that is no longer
-// the one speaking (VoiceOver turned on, another engine loaded): a cut here
-// cannot reach them, and saying them again would say them twice.
-func (r *Renderer) pruneRouteLocked() {
-	route := r.voice.Route()
-	kept := r.queue[:0]
-	for _, q := range r.queue {
-		if q.route == route {
-			kept = append(kept, q)
-		}
-	}
-	r.queue = kept
-}
-
-// waitingLocked: what a cut would drop unheard, less channel's: everything
-// behind the head, and the head too if no sound of it was heard yet.
-func (r *Renderer) waitingLocked(channel string) []queued {
-	var out []queued
-	for i, q := range r.queue {
-		if (i > 0 || !q.started) && q.channel != channel {
-			out = append(out, q)
-		}
-	}
-	return out
 }
 
 func (r *Renderer) requeueLocked(waiting []queued) {
