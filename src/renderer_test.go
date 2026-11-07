@@ -11,6 +11,7 @@ import (
 type fakeVoice struct {
 	log       []string
 	voiceOver bool
+	route     string
 	ids       map[string]string // text -> the id of its newest Say
 	n         int
 }
@@ -32,8 +33,10 @@ func (f *fakeVoice) Say(text string, high bool) string {
 // finish reports the newest utterance of text as over, as the platform's
 // speech.finished would.
 func (f *fakeVoice) finish(r *Renderer, text string) { r.SpeechFinished(f.ids[text]) }
-func (f *fakeVoice) Stop()                           { f.log = append(f.log, "stop") }
-func (f *fakeVoice) UseVoiceOver(on bool)            { f.voiceOver = on }
+
+func (f *fakeVoice) Route() string        { return f.route }
+func (f *fakeVoice) Stop()                { f.log = append(f.log, "stop") }
+func (f *fakeVoice) UseVoiceOver(on bool) { f.voiceOver = on }
 
 func doc(kind, title, phrase, urgency string, items ...string) branchkit.OutputState {
 	d := branchkit.OutputState{Kind: kind, Title: title, Phrase: phrase, Urgency: urgency}
@@ -202,6 +205,7 @@ func TestAmbientQueuesInterruptCutsInAcrossChannels(t *testing.T) {
 	if !reflect.DeepEqual(v.log, []string{"say:6 commands: left", "say:quiet mode"}) {
 		t.Fatalf("ambient queues: %v", v.log)
 	}
+	r.SpeechStarted(v.ids["6 commands: left"])
 	// The interrupt cuts the choices list; "quiet mode", which was waiting
 	// and never heard, is said again after it.
 	r.HandleState(state("r", 1, true, doc("problem", "Mic lost", "Reconnect it", "interrupt")))
@@ -219,6 +223,7 @@ func TestNotableWaitsOnAnotherChannelOnlyInterruptCutsIn(t *testing.T) {
 	if !reflect.DeepEqual(v.log, []string{"say:Download finished", "say:Back online"}) {
 		t.Fatalf("notable on another channel waits: %v", v.log)
 	}
+	r.SpeechStarted(v.ids["Download finished"])
 	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "interrupt")))
 	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full", "say:Back online"}) {
 		t.Fatalf("interrupt cuts in: %v", got)
@@ -283,6 +288,40 @@ func TestStartedDropsWhatWasAheadOfIt(t *testing.T) {
 	r.HandleState(state("b", 2, true, doc("notice", "", "three", "notable")))
 	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:three"}) {
 		t.Fatalf("started moved the head: %v", got)
+	}
+}
+
+// The head is queued but its engine has not made a sound yet: an interrupt
+// drops it unheard, so it is said again after the interrupt.
+func TestAnInterruptReSaysAnUnheardHead(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "one", "notable")))
+	r.HandleState(state("b", 1, true, doc("notice", "", "two", "notable")))
+	r.SpeechStarted(v.ids["one"])
+	v.finish(r, "one")
+	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "interrupt")))
+	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full", "say:two"}) {
+		t.Fatalf("an unheard head is said again: %v", got)
+	}
+	// Once heard, the cut head is not repeated.
+	r.SpeechStarted(v.ids["Disk full"])
+	r.HandleState(state("d", 1, true, doc("problem", "", "Mic lost", "interrupt")))
+	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Mic lost", "say:two"}) {
+		t.Fatalf("a heard head is not repeated: %v", got)
+	}
+}
+
+// Words handed to a voice that is no longer speaking (VoiceOver turned on,
+// another engine loaded) are beyond a cut: they are not said a second time
+// through the new one.
+func TestAVoiceChangeForgetsTheOldVoicesQueue(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "one", "notable")))
+	r.HandleState(state("b", 1, true, doc("notice", "", "two", "notable")))
+	v.route = "kitten"
+	r.HandleState(state("a", 2, true, doc("notice", "", "three", "notable")))
+	if !reflect.DeepEqual(v.log, []string{"say:one", "say:two", "say:three"}) {
+		t.Fatalf("nothing of the old voice is cut or repeated: %v", v.log)
 	}
 }
 

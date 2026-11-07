@@ -18,6 +18,9 @@ import (
 // there is nothing to follow (VoiceOver, or the call failed).
 type Voice interface {
 	Say(text string, high bool) string
+	// Route names what Say speaks through now (VoiceOver, the system
+	// voice, an engine stage): a cut reaches only that one's queue.
+	Route() string
 	Stop()
 	// UseVoiceOver switches Say between the system voice and VoiceOver.
 	UseVoiceOver(on bool)
@@ -81,6 +84,8 @@ type queued struct {
 	id      string
 	channel string
 	text    string
+	route   string
+	started bool // its first sound was heard
 }
 
 // Renderer turns output.state documents into utterances.
@@ -176,6 +181,7 @@ func (r *Renderer) HandleClear(msg branchkit.OutputClearedEventParams) {
 	}
 	r.newest[msg.Channel] = msg.Generation
 	delete(r.held, msg.Channel)
+	r.pruneRouteLocked()
 	if len(r.queue) == 0 || r.queue[0].channel != msg.Channel {
 		// Nothing of this channel is playing. Words of it waiting behind
 		// another channel's are left to be said: the voice can only stop
@@ -198,6 +204,7 @@ func (r *Renderer) SpeechStarted(id string) {
 	for i, q := range r.queue {
 		if q.id == id {
 			r.queue = r.queue[i:]
+			r.queue[0].started = true
 			return
 		}
 	}
@@ -317,6 +324,7 @@ func (r *Renderer) speakLocked(channel, urgency, text string) {
 	// The channel playing: the new state supersedes it. Another channel
 	// playing: only an interrupt cuts in; notable and ambient wait their
 	// turn, so one plugin's ordinary news never talks over another's.
+	r.pruneRouteLocked()
 	playing := ""
 	if len(r.queue) > 0 {
 		playing = r.queue[0].channel
@@ -337,16 +345,32 @@ func (r *Renderer) speakLocked(channel, urgency, text string) {
 }
 
 func (r *Renderer) sayLocked(channel, text string, high bool) {
+	route := r.voice.Route()
 	if id := r.voice.Say(text, high); id != "" {
-		r.queue = append(r.queue, queued{id, channel, text})
+		r.queue = append(r.queue, queued{id: id, channel: channel, text: text, route: route})
 	}
 }
 
-// waitingLocked: what waits behind the playing utterance, less channel's.
+// pruneRouteLocked forgets utterances handed to a voice that is no longer
+// the one speaking (VoiceOver turned on, another engine loaded): a cut here
+// cannot reach them, and saying them again would say them twice.
+func (r *Renderer) pruneRouteLocked() {
+	route := r.voice.Route()
+	kept := r.queue[:0]
+	for _, q := range r.queue {
+		if q.route == route {
+			kept = append(kept, q)
+		}
+	}
+	r.queue = kept
+}
+
+// waitingLocked: what a cut would drop unheard, less channel's: everything
+// behind the head, and the head too if no sound of it was heard yet.
 func (r *Renderer) waitingLocked(channel string) []queued {
 	var out []queued
 	for i, q := range r.queue {
-		if i > 0 && q.channel != channel {
+		if (i > 0 || !q.started) && q.channel != channel {
 			out = append(out, q)
 		}
 	}

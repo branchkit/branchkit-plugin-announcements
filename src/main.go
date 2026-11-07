@@ -89,6 +89,18 @@ type sdkVoice struct {
 
 func (v *sdkVoice) UseVoiceOver(on bool) { v.voiceOver.Store(on) }
 
+func (v *sdkVoice) Route() string {
+	if v.voiceOver.Load() {
+		return "voiceover"
+	}
+	if v.with != nil {
+		if engine, _, _ := v.with(); engine != "" {
+			return engine
+		}
+	}
+	return "system"
+}
+
 func (v *sdkVoice) Say(text string, high bool) string {
 	if v.voiceOver.Load() {
 		// A high-priority announcement supersedes what VoiceOver is saying;
