@@ -12,9 +12,12 @@ import (
 // Voice is what the renderer speaks through. The real one calls the
 // platform's `speech.say` / `speech.stop` primitives (or `speech.announce`
 // when the policy routes through VoiceOver); tests use a fake. Say with
-// high priority cuts off whatever is playing; without it, queues.
+// high priority cuts off whatever is playing and drops what waits behind
+// it; without it, queues. Say returns the utterance's id, which the
+// platform's speech.started / speech.finished events carry, or "" when
+// there is nothing to follow (VoiceOver, or the call failed).
 type Voice interface {
-	Say(text string, high bool)
+	Say(text string, high bool) string
 	Stop()
 	// UseVoiceOver switches Say between the system voice and VoiceOver.
 	UseVoiceOver(on bool)
@@ -73,6 +76,13 @@ type heldDoc struct {
 	text       string
 }
 
+// queued is one utterance handed to the voice and not yet over.
+type queued struct {
+	id      string
+	channel string
+	text    string
+}
+
 // Renderer turns output.state documents into utterances.
 //
 // Two rules it never breaks: it is SILENT while a person holds a key (an
@@ -82,13 +92,17 @@ type heldDoc struct {
 // a newer one. During continuous listening (a persistent pipeline) it
 // speaks: the platform drops its echo from recognition by onset.
 type Renderer struct {
-	mu              sync.Mutex
-	voice           Voice
-	policy          Policy
-	listening       map[string]bool // ephemeral pipelines running
-	newest          map[string]int  // newest generation seen per channel
-	held            map[string]heldDoc
-	speakingChannel string
+	mu        sync.Mutex
+	voice     Voice
+	policy    Policy
+	listening map[string]bool // ephemeral pipelines running
+	newest    map[string]int  // newest generation seen per channel
+	held      map[string]heldDoc
+	// What the voice is saying and what waits behind it, in order: the
+	// head is playing. Followed by the platform's speech events, because
+	// "the channel spoken last" is not the one playing once anything
+	// queues.
+	queue []queued
 }
 
 func NewRenderer(v Voice) *Renderer {
@@ -162,9 +176,42 @@ func (r *Renderer) HandleClear(msg branchkit.OutputClearedEventParams) {
 	}
 	r.newest[msg.Channel] = msg.Generation
 	delete(r.held, msg.Channel)
-	if r.speakingChannel == msg.Channel {
-		r.voice.Stop()
-		r.speakingChannel = ""
+	if len(r.queue) == 0 || r.queue[0].channel != msg.Channel {
+		// Nothing of this channel is playing. Words of it waiting behind
+		// another channel's are left to be said: the voice can only stop
+		// everything, and cutting someone else's sentence is worse than a
+		// notice heard after its card has gone (a person who cannot see
+		// the card still needs it).
+		return
+	}
+	waiting := r.waitingLocked(msg.Channel)
+	r.voice.Stop()
+	r.queue = nil
+	r.requeueLocked(waiting)
+}
+
+// SpeechStarted: utterance id is now heard, so whatever this renderer
+// queued ahead of it is over, even if its end was never reported.
+func (r *Renderer) SpeechStarted(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, q := range r.queue {
+		if q.id == id {
+			r.queue = r.queue[i:]
+			return
+		}
+	}
+}
+
+// SpeechFinished: utterance id is over (played out, cut off or dropped).
+func (r *Renderer) SpeechFinished(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, q := range r.queue {
+		if q.id == id {
+			r.queue = append(r.queue[:i:i], r.queue[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -267,13 +314,49 @@ func firstNonEmpty(a, b string) (string, bool) {
 }
 
 func (r *Renderer) speakLocked(channel, urgency, text string) {
-	// Same channel: the new state supersedes what is playing. Another
-	// channel: only an interrupt cuts in; notable and ambient wait their
+	// The channel playing: the new state supersedes it. Another channel
+	// playing: only an interrupt cuts in; notable and ambient wait their
 	// turn, so one plugin's ordinary news never talks over another's.
-	high := r.speakingChannel == channel || (r.speakingChannel != "" && urgency == "interrupt")
+	playing := ""
+	if len(r.queue) > 0 {
+		playing = r.queue[0].channel
+	}
+	high := playing != "" && (playing == channel || urgency == "interrupt")
 	branchkit.Logf("announcements", "speak %s (%s%s): %q", channel, urgency, map[bool]string{true: ", cuts in", false: ""}[high], text)
-	r.voice.Say(text, high)
-	r.speakingChannel = channel
+	if !high {
+		r.sayLocked(channel, text, false)
+		return
+	}
+	// A cut drops everything queued behind the sentence it cuts; other
+	// channels' words that were waiting are said again after this one.
+	// This channel's are not: the new state replaces them.
+	waiting := r.waitingLocked(channel)
+	r.queue = nil
+	r.sayLocked(channel, text, true)
+	r.requeueLocked(waiting)
+}
+
+func (r *Renderer) sayLocked(channel, text string, high bool) {
+	if id := r.voice.Say(text, high); id != "" {
+		r.queue = append(r.queue, queued{id, channel, text})
+	}
+}
+
+// waitingLocked: what waits behind the playing utterance, less channel's.
+func (r *Renderer) waitingLocked(channel string) []queued {
+	var out []queued
+	for i, q := range r.queue {
+		if i > 0 && q.channel != channel {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func (r *Renderer) requeueLocked(waiting []queued) {
+	for _, q := range waiting {
+		r.sayLocked(q.channel, q.text, false)
+	}
 }
 
 // The boundary: the microphone closed, so everything held while it was open
@@ -291,14 +374,13 @@ func (r *Renderer) flushHeldLocked() {
 	sort.Slice(pending, func(i, j int) bool { return pending[i].doc.generation < pending[j].doc.generation })
 	for _, e := range pending {
 		branchkit.Logf("announcements", "speak %s (%s, held): %q", e.channel, e.doc.urgency, e.doc.text)
-		r.voice.Say(e.doc.text, false)
-		r.speakingChannel = e.channel
+		r.sayLocked(e.channel, e.doc.text, false)
 	}
 }
 
 func (r *Renderer) stopAllLocked(keepHeld bool) {
 	r.voice.Stop()
-	r.speakingChannel = ""
+	r.queue = nil
 	if !keepHeld {
 		r.held = map[string]heldDoc{}
 	}

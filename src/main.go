@@ -89,14 +89,15 @@ type sdkVoice struct {
 
 func (v *sdkVoice) UseVoiceOver(on bool) { v.voiceOver.Store(on) }
 
-func (v *sdkVoice) Say(text string, high bool) {
+func (v *sdkVoice) Say(text string, high bool) string {
 	if v.voiceOver.Load() {
 		// A high-priority announcement supersedes what VoiceOver is saying;
-		// there is no queue to speak of, so priority is moot.
+		// there is no queue to speak of, so priority is moot, and nothing
+		// to follow.
 		if err := v.p.SpeechAnnounce(branchkit.SpeechAnnounceRequest{Text: text}); err != nil {
 			branchkit.Logf("announcements", "speech.announce failed: %v", err)
 		}
-		return
+		return ""
 	}
 	priority := "normal"
 	if high {
@@ -114,9 +115,12 @@ func (v *sdkVoice) Say(text string, high bool) {
 			}
 		}
 	}
-	if _, err := v.p.SpeechSay(req); err != nil {
+	res, err := v.p.SpeechSay(req)
+	if err != nil {
 		branchkit.Logf("announcements", "speech.say failed: %v", err)
+		return ""
 	}
+	return res.ID
 }
 
 func (v *sdkVoice) Stop() {
@@ -229,6 +233,9 @@ func main() {
 	p.OnPipelineStopped(func(m branchkit.PipelineStoppedEventParams) {
 		h.r.PipelineStopped(m.Pipeline)
 	})
+	// Which utterance is playing: what a clear or a new state may cut.
+	p.OnSpeechStarted(func(m branchkit.SpeechStartedEventParams) { h.r.SpeechStarted(m.ID) })
+	p.OnSpeechFinished(func(m branchkit.SpeechFinishedEventParams) { h.r.SpeechFinished(m.ID) })
 
 	p.Page("announcements", h.renderSettings)
 	branchkit.HandleCommand(p, "set_speak", func(req *setChoiceRequest) error {

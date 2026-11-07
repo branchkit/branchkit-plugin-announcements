@@ -241,6 +241,12 @@
         "pattern": "_platform.pipeline.stopped"
       },
       {
+        "pattern": "_platform.speech.started"
+      },
+      {
+        "pattern": "_platform.speech.finished"
+      },
+      {
         "pattern": "_platform.collection.updated"
       }
     ],

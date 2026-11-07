@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -10,16 +11,29 @@ import (
 type fakeVoice struct {
 	log       []string
 	voiceOver bool
+	ids       map[string]string // text -> the id of its newest Say
+	n         int
 }
 
-func (f *fakeVoice) Say(text string, high bool) {
+func (f *fakeVoice) Say(text string, high bool) string {
 	if high {
 		f.log = append(f.log, "stop")
 	}
 	f.log = append(f.log, "say:"+text)
+	f.n++
+	id := fmt.Sprintf("u%d", f.n)
+	if f.ids == nil {
+		f.ids = map[string]string{}
+	}
+	f.ids[text] = id
+	return id
 }
-func (f *fakeVoice) Stop()                { f.log = append(f.log, "stop") }
-func (f *fakeVoice) UseVoiceOver(on bool) { f.voiceOver = on }
+
+// finish reports the newest utterance of text as over, as the platform's
+// speech.finished would.
+func (f *fakeVoice) finish(r *Renderer, text string) { r.SpeechFinished(f.ids[text]) }
+func (f *fakeVoice) Stop()                           { f.log = append(f.log, "stop") }
+func (f *fakeVoice) UseVoiceOver(on bool)            { f.voiceOver = on }
 
 func doc(kind, title, phrase, urgency string, items ...string) branchkit.OutputState {
 	d := branchkit.OutputState{Kind: kind, Title: title, Phrase: phrase, Urgency: urgency}
@@ -188,15 +202,16 @@ func TestAmbientQueuesInterruptCutsInAcrossChannels(t *testing.T) {
 	if !reflect.DeepEqual(v.log, []string{"say:6 commands: left", "say:quiet mode"}) {
 		t.Fatalf("ambient queues: %v", v.log)
 	}
+	// The interrupt cuts the choices list; "quiet mode", which was waiting
+	// and never heard, is said again after it.
 	r.HandleState(state("r", 1, true, doc("problem", "Mic lost", "Reconnect it", "interrupt")))
-	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Mic lost. Reconnect it"}) {
-		t.Fatalf("interrupt cuts in: %v", got)
+	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Mic lost. Reconnect it", "say:quiet mode"}) {
+		t.Fatalf("interrupt cuts in, what waited is said after: %v", got)
 	}
 }
 
 // Notable is news, not an alarm: on another channel it waits its turn, and
-// only interrupt cuts into what is playing. The same channel still
-// supersedes itself whatever its urgency.
+// only interrupt cuts into what is playing.
 func TestNotableWaitsOnAnotherChannelOnlyInterruptCutsIn(t *testing.T) {
 	r, v := renderer(t, on)
 	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
@@ -204,13 +219,70 @@ func TestNotableWaitsOnAnotherChannelOnlyInterruptCutsIn(t *testing.T) {
 	if !reflect.DeepEqual(v.log, []string{"say:Download finished", "say:Back online"}) {
 		t.Fatalf("notable on another channel waits: %v", v.log)
 	}
-	r.HandleState(state("b", 2, true, doc("notice", "", "Offline again", "ambient")))
-	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Offline again"}) {
-		t.Fatalf("same channel supersedes itself: %v", got)
-	}
-	r.HandleState(state("a", 2, true, doc("problem", "", "Disk full", "interrupt")))
-	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full"}) {
+	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "interrupt")))
+	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full", "say:Back online"}) {
 		t.Fatalf("interrupt cuts in: %v", got)
+	}
+}
+
+// A channel supersedes its own sentence while that sentence plays, and
+// only then: once it has finished, or while another channel's plays, a new
+// state queues instead of cutting someone else off.
+func TestSameChannelSupersedesOnlyItsOwnPlayingSentence(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
+	r.HandleState(state("b", 1, true, doc("notice", "", "Back online", "notable")))
+	// a is playing, b waits: b's update must not cut a.
+	r.HandleState(state("b", 2, true, doc("notice", "", "Offline again", "ambient")))
+	if !reflect.DeepEqual(v.log, []string{"say:Download finished", "say:Back online", "say:Offline again"}) {
+		t.Fatalf("a waiting channel's update queues: %v", v.log)
+	}
+	v.finish(r, "Download finished")
+	v.finish(r, "Back online")
+	// b's own sentence is playing now: its next state cuts it.
+	r.HandleState(state("b", 3, true, doc("notice", "", "Online", "ambient")))
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Online"}) {
+		t.Fatalf("same channel supersedes its playing sentence: %v", got)
+	}
+	v.finish(r, "Online")
+	// Nothing plays: a new state on any channel just speaks.
+	r.HandleState(state("b", 4, true, doc("notice", "", "Offline", "ambient")))
+	if got := v.log[len(v.log)-1]; got != "say:Offline" || v.log[len(v.log)-2] == "stop" {
+		t.Fatalf("after the end nothing is cut: %v", v.log)
+	}
+}
+
+// A notification queued behind another channel's speech is still heard when
+// its card times out (its channel is cleared) before its turn comes: the
+// clear must not stop the other channel's sentence, and so the queue.
+func TestClearOfAWaitingChannelCutsNothing(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("discovery", 1, true, doc("choices", "", "snap left. 6 commands", "ambient", "left", "right")))
+	r.HandleState(state("notification", 1, true, doc("notice", "Download finished", "The model is ready", "notable")))
+	r.HandleClear(branchkit.OutputClearedEventParams{Channel: "notification", PluginID: "_platform", Generation: 2})
+	for _, l := range v.log {
+		if l == "stop" {
+			t.Fatalf("a waiting channel's clear stopped the voice: %v", v.log)
+		}
+	}
+	// Clearing the channel that plays stops it; what waited is said again.
+	r.HandleClear(branchkit.OutputClearedEventParams{Channel: "discovery", PluginID: "voice", Generation: 2})
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Download finished. The model is ready"}) {
+		t.Fatalf("clear of the playing channel: %v", got)
+	}
+}
+
+// An utterance whose end was never reported does not hold the queue: the
+// next one starting means everything ahead of it is over.
+func TestStartedDropsWhatWasAheadOfIt(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "one", "notable")))
+	r.HandleState(state("b", 1, true, doc("notice", "", "two", "notable")))
+	r.SpeechStarted(v.ids["two"])
+	// b plays now, so b's update supersedes it and a is not re-said.
+	r.HandleState(state("b", 2, true, doc("notice", "", "three", "notable")))
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:three"}) {
+		t.Fatalf("started moved the head: %v", got)
 	}
 }
 
