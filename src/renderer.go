@@ -268,9 +268,9 @@ func firstNonEmpty(a, b string) (string, bool) {
 
 func (r *Renderer) speakLocked(channel, urgency, text string) {
 	// Same channel: the new state supersedes what is playing. Another
-	// channel: only something notable or an interrupt cuts in; ambient
-	// waits its turn.
-	high := r.speakingChannel == channel || (r.speakingChannel != "" && urgency != "ambient")
+	// channel: only an interrupt cuts in; notable and ambient wait their
+	// turn, so one plugin's ordinary news never talks over another's.
+	high := r.speakingChannel == channel || (r.speakingChannel != "" && urgency == "interrupt")
 	branchkit.Logf("announcements", "speak %s (%s%s): %q", channel, urgency, map[bool]string{true: ", cuts in", false: ""}[high], text)
 	r.voice.Say(text, high)
 	r.speakingChannel = channel

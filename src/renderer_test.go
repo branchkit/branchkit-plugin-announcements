@@ -181,7 +181,7 @@ func TestNewerGenerationSupersedesAndStaleIsIgnored(t *testing.T) {
 	}
 }
 
-func TestAmbientQueuesNotableCutsInAcrossChannels(t *testing.T) {
+func TestAmbientQueuesInterruptCutsInAcrossChannels(t *testing.T) {
 	r, v := renderer(t, on)
 	r.HandleState(state("d", 1, true, doc("choices", "", "6 commands", "ambient", "left")))
 	r.HandleState(state("n", 1, true, doc("mode", "", "quiet mode", "ambient")))
@@ -190,6 +190,26 @@ func TestAmbientQueuesNotableCutsInAcrossChannels(t *testing.T) {
 	}
 	r.HandleState(state("r", 1, true, doc("problem", "Mic lost", "Reconnect it", "interrupt")))
 	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Mic lost. Reconnect it"}) {
+		t.Fatalf("interrupt cuts in: %v", got)
+	}
+}
+
+// Notable is news, not an alarm: on another channel it waits its turn, and
+// only interrupt cuts into what is playing. The same channel still
+// supersedes itself whatever its urgency.
+func TestNotableWaitsOnAnotherChannelOnlyInterruptCutsIn(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
+	r.HandleState(state("b", 1, true, doc("notice", "", "Back online", "notable")))
+	if !reflect.DeepEqual(v.log, []string{"say:Download finished", "say:Back online"}) {
+		t.Fatalf("notable on another channel waits: %v", v.log)
+	}
+	r.HandleState(state("b", 2, true, doc("notice", "", "Offline again", "ambient")))
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Offline again"}) {
+		t.Fatalf("same channel supersedes itself: %v", got)
+	}
+	r.HandleState(state("a", 2, true, doc("problem", "", "Disk full", "interrupt")))
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full"}) {
 		t.Fatalf("interrupt cuts in: %v", got)
 	}
 }
