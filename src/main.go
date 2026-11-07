@@ -135,10 +135,10 @@ func (v *sdkVoice) Say(text string, high bool) string {
 	return res.ID
 }
 
+// Stop silences the system voice and every engine, whichever speaks now:
+// words handed to one before VoiceOver took over are still playing there.
+// VoiceOver's own announcements cannot be cancelled from here.
 func (v *sdkVoice) Stop() {
-	if v.voiceOver.Load() {
-		return // VoiceOver announcements cannot be cancelled from here
-	}
 	if err := v.p.SpeechStop(); err != nil {
 		branchkit.Logf("announcements", "speech.stop failed: %v", err)
 	}
