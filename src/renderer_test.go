@@ -50,8 +50,23 @@ func doc(kind, title, phrase, urgency string, items ...string) branchkit.OutputS
 	return d
 }
 
+// state is the event as the platform sends it for a plugin that declares
+// its output may interrupt (voice does): a document that asks to interrupt
+// (urgency interrupt, or a problem) is granted it.
 func state(channel string, gen int, changed bool, d branchkit.OutputState) branchkit.OutputStateEventParams {
-	return branchkit.OutputStateEventParams{Channel: channel, PluginID: "voice", Generation: gen, MeaningChanged: changed, State: d}
+	attention := branchkit.OutputAttentionPolite
+	if d.Urgency == "interrupt" || d.Kind == "problem" {
+		attention = branchkit.OutputAttentionInterrupt
+	}
+	return branchkit.OutputStateEventParams{Channel: channel, PluginID: "voice", Generation: gen, MeaningChanged: changed, State: d, Attention: attention}
+}
+
+// undeclared is the same event from a plugin that does not declare it:
+// whatever the document asks for, the platform answers polite.
+func undeclared(msg branchkit.OutputStateEventParams) branchkit.OutputStateEventParams {
+	msg.PluginID = "other"
+	msg.Attention = branchkit.OutputAttentionPolite
+	return msg
 }
 
 func renderer(t *testing.T, p Policy) (*Renderer, *fakeVoice) {
@@ -227,6 +242,51 @@ func TestNotableWaitsOnAnotherChannelOnlyInterruptCutsIn(t *testing.T) {
 	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "interrupt")))
 	if got := v.log[len(v.log)-3:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full", "say:Back online"}) {
 		t.Fatalf("interrupt cuts in: %v", got)
+	}
+}
+
+// The cut-in reads the platform's attention, never the document's own
+// urgency or kind: an interrupt or a problem from a plugin that does not
+// declare it waits its turn like any other news.
+func TestUndeclaredInterruptOrProblemWaitsItsTurn(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
+	r.SpeechStarted(v.ids["Download finished"])
+	r.HandleState(undeclared(state("b", 1, true, doc("notice", "", "Act now", "interrupt"))))
+	r.HandleState(undeclared(state("c", 1, true, doc("problem", "Disk full", "Free some space", "ambient"))))
+	want := []string{"say:Download finished", "say:Act now", "say:Disk full. Free some space"}
+	if !reflect.DeepEqual(v.log, want) {
+		t.Fatalf("undeclared interrupt and problem queue behind what plays: %v", v.log)
+	}
+}
+
+// A declared problem cuts in even when its urgency asks for nothing: the
+// platform answered interrupt for it, and that answer is the one read.
+func TestDeclaredProblemCutsInWhateverItsUrgency(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
+	r.SpeechStarted(v.ids["Download finished"])
+	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "ambient")))
+	if got := v.log[len(v.log)-2:]; !reflect.DeepEqual(got, []string{"stop", "say:Disk full"}) {
+		t.Fatalf("a declared problem cuts in: %v", got)
+	}
+}
+
+// A key hold holds everything, an interrupt the platform granted included:
+// it is said at the boundary, after the hold, and cuts nothing then.
+func TestAHoldKeepsBackADeclaredInterrupt(t *testing.T) {
+	r, v := renderer(t, on)
+	r.HandleState(state("a", 1, true, doc("notice", "", "Download finished", "notable")))
+	r.SpeechStarted(v.ids["Download finished"])
+	r.PipelineStarted("commands", true)
+	r.HandleState(state("c", 1, true, doc("problem", "", "Disk full", "interrupt")))
+	if got := says(v); !reflect.DeepEqual(got, []string{"say:Download finished"}) {
+		t.Fatalf("nothing is said during a hold: %v", got)
+	}
+	before := len(v.log)
+	r.PipelineStopped("commands")
+	if got := v.log[before:]; !reflect.DeepEqual(got, []string{"say:Disk full"}) {
+		t.Fatalf("held interrupt said at the boundary, without a cut: %v", got)
 	}
 }
 

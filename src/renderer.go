@@ -76,7 +76,7 @@ func DerivePolicy(pr Profile, voiceOverOn bool) Policy {
 
 type heldDoc struct {
 	generation int
-	urgency    string
+	attention  branchkit.OutputAttention
 	text       string
 }
 
@@ -168,10 +168,10 @@ func (r *Renderer) HandleState(msg branchkit.OutputStateEventParams) {
 		return
 	}
 	if len(r.listening) > 0 {
-		r.held[msg.Channel] = heldDoc{msg.Generation, msg.State.Urgency, text}
+		r.held[msg.Channel] = heldDoc{msg.Generation, msg.Attention, text}
 		return
 	}
-	r.speakLocked(msg.Channel, msg.State.Urgency, text)
+	r.speakLocked(msg.Channel, msg.Attention, text)
 }
 
 func (r *Renderer) HandleClear(msg branchkit.OutputClearedEventParams) {
@@ -363,10 +363,13 @@ func firstNonEmpty(a, b string) (string, bool) {
 	return "", false
 }
 
-func (r *Renderer) speakLocked(channel, urgency, text string) {
+func (r *Renderer) speakLocked(channel string, attention branchkit.OutputAttention, text string) {
 	// The channel playing: the new state supersedes it. Another channel
-	// playing: only an interrupt cuts in; notable and ambient wait their
-	// turn, so one plugin's ordinary news never talks over another's.
+	// playing: only a document the platform says may interrupt cuts in.
+	// That is the platform's answer, not the document's urgency or kind: a
+	// plugin's urgent or problem document is a request, granted only when
+	// its manifest declares that its output may interrupt. Everything else
+	// waits its turn, so one plugin's news never talks over another's.
 	route := r.voice.Route()
 	playing := ""
 	for _, q := range r.queue {
@@ -375,8 +378,8 @@ func (r *Renderer) speakLocked(channel, urgency, text string) {
 			break
 		}
 	}
-	high := playing != "" && (playing == channel || urgency == "interrupt")
-	branchkit.Logf("announcements", "speak %s (%s%s): %q", channel, urgency, map[bool]string{true: ", cuts in", false: ""}[high], text)
+	high := playing != "" && (playing == channel || attention == branchkit.OutputAttentionInterrupt)
+	branchkit.Logf("announcements", "speak %s (%s%s): %q", channel, attention, map[bool]string{true: ", cuts in", false: ""}[high], text)
 	if !high {
 		r.sayLocked(channel, text, false)
 		return
@@ -429,7 +432,7 @@ func (r *Renderer) flushHeldLocked() {
 	r.held = map[string]heldDoc{}
 	sort.Slice(pending, func(i, j int) bool { return pending[i].doc.generation < pending[j].doc.generation })
 	for _, e := range pending {
-		branchkit.Logf("announcements", "speak %s (%s, held): %q", e.channel, e.doc.urgency, e.doc.text)
+		branchkit.Logf("announcements", "speak %s (%s, held): %q", e.channel, e.doc.attention, e.doc.text)
 		r.sayLocked(e.channel, e.doc.text, false)
 	}
 }
